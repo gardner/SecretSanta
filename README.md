@@ -1,105 +1,94 @@
-# Secret Santa Web App
+# Secret Santa
 
-A festive Secret Santa party organizer with Christmas theme and snow animations.
+A Secret Santa organizer built with TypeScript, Express, and a browser frontend.
 
-## Preview
+![Secret Santa app](public/screenshot.png)
 
-![Secret Santa App Screenshot](public/screenshot.png)
+## Run locally
 
-## Features
+Requires Node.js 24 or newer and pnpm 10.18.3 (`corepack enable`).
 
-- Create Secret Santa parties
-- Automatic random assignment with no double-ups
-- Set budget limits and gift criteria
-- Secure unique guest links (no snooping!)
-- Beautiful Christmas theme with snow animations
-- Docker deployment ready
-
-## Configuration
-
-Create a `.env` file with your settings:
-
-```env
-# Server port (default: 8003)
-PORT=8003
-
-# Base URL for generating guest links
-# For local development:
-BASE_URL=http://localhost:8003
-# For production deployment:
-BASE_URL=https://your-domain.com
+```sh
+pnpm install --frozen-lockfile
+cp .env.example .env
+pnpm build
+pnpm start
 ```
 
-**Important:** Set `BASE_URL` to your production domain when deploying, as this URL is used to generate the guest invitation links.
+Open <http://localhost:8003>. The server loads `.env` automatically. Set `BASE_URL`
+to the public HTTP(S) origin before sharing invitations; it must not include a path.
+If omitted, it defaults to `http://localhost:${PORT}`. `PORT` defaults to 8003.
+`DATA_DIR` optionally overrides the default `data/` directory.
 
-## Quick Start with Docker
+`pnpm dev` builds the browser code and watches the server. After changing browser
+TypeScript, run `pnpm build:client` and reload the page.
 
-1. **Build and run with Docker Compose:**
-   ```bash
-   docker-compose up --build
-   ```
+## Use
 
-2. **Access the app:**
-   - Local URL: `http://localhost:8003`
+Create a party with 2–50 unique guest names, an optional budget, and optional gift
+criteria. Share each personal invitation only with its intended guest. Possession
+of a guest URL grants access to that assignment; organizers receive every URL.
+There is no party-ID/name endpoint for reading assignments.
 
-## Manual Installation
+All assignments are generated and persisted when a party is created. Names and
+gift criteria are displayed as text, including punctuation and Unicode.
 
-1. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+## Storage and migration
 
-2. **Start the server:**
-   ```bash
-   npm start
-   ```
+The app stores parties, invitation tokens, and assignments together in
+`data/state.json`. Writes are serialized, flushed to a temporary file, and renamed
+atomically. Success is returned only after persistence succeeds. The previous
+snapshot is kept in `state.json.backup`; only one backup is retained.
 
-3. **For development:**
-   ```bash
-   npm run dev
-   ```
+Run **one server process per data directory**, on a local filesystem supporting
+atomic rename. This file store does not support multiple replicas. Keep a separate
+backup for disaster recovery; atomic replacement does not guarantee survival of
+all hardware or filesystem failures.
 
-## Usage
+On first startup, existing `parties.json`, `assignments.json`, and
+`guest_links.json` are migrated together. Existing invitations and assignments are
+preserved, and previously unassigned parties receive assignments during migration.
+Legacy files are left intact. Stop the old server before migrating and back up its
+data directory. Missing, corrupt, or inconsistent storage prevents startup rather
+than silently discarding records. To restore a snapshot, stop the server, preserve
+the damaged files for investigation, and replace `state.json` with a known-good
+backup before restarting.
 
-1. **Create a Party:**
-   - Visit the main page
-   - Enter party name, budget (optional), and criteria (optional)
-   - Add guest names (minimum 2, include yourself if participating!)
-   - Click "Create Secret Santa Party"
+## Docker
 
-2. **Share with Guests:**
-   - Copy the individual personal links for each guest
-   - Each person gets their own unique link
-   - The party creator uses their personal link just like everyone else
+```sh
+docker compose up --build -d
+```
 
-3. **Guest Participation:**
-   - Each person visits their unique personal link
-   - They immediately see who they're buying a gift for
-   - Assignments are kept secret and secure!
+Compose reads `.env` and retains the existing `./data:/app/data` bind mount so
+existing installations migrate in place. Back up `./data` before upgrading.
+Set `BASE_URL` to the public origin, including the published port when applicable.
+Creation is limited to ten parties per minute per connection IP. Behind a reverse
+proxy this limit is shared; guest reads are not subject to that creation limit.
 
-## Technology Stack
+## Quality checks
 
-- **Backend:** Node.js with Express
-- **Frontend:** HTML5, CSS3, JavaScript, Tailwind CSS
-- **Styling:** Christmas theme with custom animations
-- **Deployment:** Docker & Docker Compose
-- **Data Storage:** In-memory (for demo purposes)
+```sh
+pnpm check
+```
 
-## Docker Deployment
+This runs strict TypeScript checking, type-aware ESLint, Prettier verification,
+regression tests, and production builds. ESLint enforces cyclomatic complexity of
+at most 10 and at most 500 nonblank, noncomment lines per TypeScript file.
+TypeScript enables unchecked-index detection, exact optional properties, unused
+code checks, and implicit-return checks. TypeScript 6.0 is used to stay within the
+supported range of the installed typescript-eslint release.
 
-The app is configured to run on `0.0.0.0:8003` using Docker:
+The analysis requirements in `AGENTS.md` link to Python tooling; this repository
+uses the corresponding TypeScript tools. CI enforces all checks. Optional local
+pre-commit hooks use the same tools:
 
-- **Port:** 8003
-- **Container Name:** secret-santa-app
-- **Restart Policy:** unless-stopped
+```sh
+uv tool install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
 
-**For Production:** Update the `BASE_URL` environment variable in `docker-compose.yml` to your actual domain before deploying.
-
-## Notes
-
-- Uses file-based storage with automatic backups
-- Parties and assignments persist between server restarts
-- The assignment algorithm ensures no one gets themselves
-- All assignments are generated once per party and saved
-
-## Merry Christmas! 🎅🎄❄️
+Use `pnpm format` to format changes. Tests use temporary directories and never
+modify production data. They cover concurrency, persistence failures, restart
+stability, migration, invitation privacy, and unusual names.

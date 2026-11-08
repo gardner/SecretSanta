@@ -1,0 +1,20 @@
+repos:
+  - repo: local
+    hooks:
+      - id: eslint
+        name: TypeScript lint, complexity, and 500-line limit
+        entry: pnpm exec eslint
+        language: system
+        files: \.(ts|mjs)$
+      - id: prettier
+        name: Formatting
+        entry: pnpm exec prettier --check --ignore-unknown
+        language: system
+        types: [text]
+        exclude: ^(AGENTS\.md|pnpm-lock\.yaml)$
+      - id: typescript
+        name: Strict TypeScript checking
+        entry: pnpm typecheck
+        language: system
+        pass_filenames: false
+        files: ^(src/|tests/|tsconfig.*\.json|package\.json|pnpm-lock\.yaml)

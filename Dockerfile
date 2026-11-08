@@ -1,25 +1,19 @@
-FROM node:18-alpine
-
+FROM node:24-alpine AS build
 WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY tsconfig*.json ./
+COPY src ./src
+RUN pnpm build && pnpm prune --prod
 
-# Set timezone to Australia/Sydney
-ENV TZ=Australia/Sydney
-RUN apk add --no-cache tzdata
-
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies
-RUN npm install --production
-
-# Copy application code
-COPY . .
-
-# Create public directory if it doesn't exist
-RUN mkdir -p public
-
-# Expose port
+FROM node:24-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY package.json ./
+COPY public ./public
+RUN mkdir data
 EXPOSE 8003
-
-# Run the application
-CMD ["npm", "start"]
+CMD ["node", "dist/server.js"]
