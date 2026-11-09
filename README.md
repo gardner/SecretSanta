@@ -30,29 +30,45 @@ criteria. Share each personal invitation only with its intended guest. Possessio
 of a guest URL grants access to that assignment; organizers receive every URL.
 There is no party-ID/name endpoint for reading assignments.
 
-All assignments are generated and persisted when a party is created. Names and
+All assignments are drawn uniformly from permutations with no self-assignments
+and persisted when a party is created. Mutual pairs and smaller cycles are allowed;
+existing assignments are never redrawn. Names and
 gift criteria are displayed as text, including punctuation and Unicode.
 
 ## Storage and migration
 
 The app stores parties, invitation tokens, and assignments together in
 `data/state.json`. Writes are serialized, flushed to a temporary file, and renamed
-atomically. Success is returned only after persistence succeeds. The previous
+atomically, then the parent directory is synced before reporting success. If a
+rename completes but durability cannot be confirmed, further writes are blocked
+until restart so stale in-memory state cannot overwrite that commit. The previous
 snapshot is kept in `state.json.backup`; only one backup is retained.
 
 Run **one server process per data directory**, on a local filesystem supporting
-atomic rename. This file store does not support multiple replicas. Keep a separate
+atomic rename and directory syncing (the Linux Docker deployment supports both).
+This file store does not support multiple replicas. Keep a separate
 backup for disaster recovery; atomic replacement does not guarantee survival of
 all hardware or filesystem failures.
 
 On first startup, existing `parties.json`, `assignments.json`, and
 `guest_links.json` are migrated together. Existing invitations and assignments are
 preserved, and previously unassigned parties receive assignments during migration.
+The known legacy `__proto__` assignment omission is repaired only when the missing
+recipient can be uniquely inferred without changing any saved assignment.
 Legacy files are left intact. Stop the old server before migrating and back up its
 data directory. Missing, corrupt, or inconsistent storage prevents startup rather
-than silently discarding records. To restore a snapshot, stop the server, preserve
+than silently discarding records. A `state.initialized` marker and the backup
+prevent a missing current snapshot from triggering a stale legacy migration.
+An interrupted first write may leave only this marker: inspect and recover the
+data before restarting, rather than deleting the marker to bypass this check.
+To restore a snapshot, stop the server, preserve
 the damaged files for investigation, and replace `state.json` with a known-good
 backup before restarting.
+
+Guest lookups use a token index and return only the requested assignment. New
+parties are validated against committed IDs; backup bytes are cached rather than
+read back on every save. Snapshot serialization and writes still scale with total
+stored history; use a transactional database if that becomes a bottleneck.
 
 ## Docker
 
@@ -63,7 +79,10 @@ docker compose up --build -d
 Compose reads `.env` and retains the existing `./data:/app/data` bind mount so
 existing installations migrate in place. Back up `./data` before upgrading.
 Set `BASE_URL` to the public origin, including the published port when applicable.
-Creation is limited to ten parties per minute per connection IP. Behind a reverse
+Creation is limited to ten successful or in-flight parties per minute per
+connection IP. Invalid inputs and failed saves do not consume that quota. A
+separate ceiling of 60 creation requests per minute limits repeated failures and
+abuse. Behind a reverse
 proxy this limit is shared; guest reads are not subject to that creation limit.
 
 ## Quality checks

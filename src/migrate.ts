@@ -20,7 +20,18 @@ const legacyParty = z.object({
   createdAt: z.string(),
   guests: z.array(z.string()).min(2),
 });
-const record = <T extends z.ZodType>(schema: T) => z.record(z.string(), schema);
+// Map entries explicitly so __proto__ survives validation as an ordinary key.
+const record = <T extends z.ZodType>(schema: T) =>
+  z
+    .custom<Record<string, unknown>>(
+      (value) =>
+        typeof value === "object" && value !== null && !Array.isArray(value),
+    )
+    .transform((value) =>
+      Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [key, schema.parse(item)]),
+      ),
+    );
 
 export async function migrate(directory: string): Promise<Snapshot> {
   const raw = await Promise.all(
@@ -48,7 +59,7 @@ export async function migrate(directory: string): Promise<Snapshot> {
         ? assignments[party.id]
         : undefined;
       const recipients = previous
-        ? new Map(Object.entries(previous))
+        ? recoverAssignments(party.guests, previous)
         : assign(party.guests);
       return {
         ...party,
@@ -76,4 +87,30 @@ function findGuestLink(
       "Missing or duplicate legacy guest link; restore storage from backup",
     );
   return id;
+}
+
+function recoverAssignments(
+  names: string[],
+  previous: Record<string, string>,
+): Map<string, string> {
+  const recipients = new Map(Object.entries(previous));
+  const missing = names.filter((name) => !recipients.has(name));
+  if (missing.length === 0) return recipients;
+  const used = new Set(recipients.values());
+  const remaining = names.filter((name) => !used.has(name));
+  // Only repair the known legacy setter bug, never guess or redraw a party.
+  if (
+    missing.length !== 1 ||
+    missing[0] !== "__proto__" ||
+    remaining.length !== 1
+  ) {
+    throw new Error(
+      "Incomplete legacy assignments; restore storage from backup",
+    );
+  }
+  const recipient = remaining[0];
+  if (recipient === undefined || recipient === "__proto__")
+    throw new Error("Invalid legacy assignment");
+  recipients.set("__proto__", recipient);
+  return recipients;
 }

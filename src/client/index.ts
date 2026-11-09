@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { parseInvitations } from "./invitations.js";
+import { readCreationResponse } from "./response.js";
 import { element, message, snow } from "./shared.js";
 
 snow();
@@ -57,10 +56,7 @@ async function createParty(): Promise<void> {
           .filter(Boolean),
       }),
     });
-    const data: unknown = await response.json();
-    if (!response.ok)
-      throw new Error(z.object({ error: z.string() }).parse(data).error);
-    const guestUrls = parseInvitations(data);
+    const guestUrls = await readCreationResponse(response);
     element("guestLinks", HTMLDivElement).replaceChildren(
       ...Object.entries(guestUrls).map(([guest, url]) =>
         renderLink(guest, url),

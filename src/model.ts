@@ -20,38 +20,61 @@ export const snapshotSchema = z.object({
 });
 export type Party = z.infer<typeof partySchema>;
 export type Snapshot = z.infer<typeof snapshotSchema>;
-const inputText = (maximum: number) => z.string().trim().min(1).max(maximum);
+const inputText = (label: string, maximum: number) =>
+  z
+    .string({ error: `${label} must be text` })
+    .trim()
+    .min(1, `${label} cannot be empty`)
+    .max(maximum, `${label} must be at most ${maximum} characters`);
+const optionalText = (label: string, maximum: number) =>
+  z
+    .string({ error: `${label} must be text` })
+    .trim()
+    .max(maximum, `${label} must be at most ${maximum} characters`)
+    .default("");
 export const inputSchema = z.object({
-  name: inputText(100),
-  budget: z.string().trim().max(50).default(""),
-  criteria: z.string().trim().max(500).default(""),
+  name: inputText("Party name", 100),
+  budget: optionalText("Budget", 50),
+  criteria: optionalText("Gift criteria", 500),
   guests: z
-    .array(inputText(50))
-    .min(2)
-    .max(50)
+    .array(inputText("Guest name", 50), { error: "Guest names must be a list" })
+    .min(2, "At least 2 guests are required")
+    .max(50, "Maximum 50 guests allowed")
     .refine(
       (names) => new Set(names).size === names.length,
       "Guest names must be unique",
     ),
 });
 
-export function assign(names: string[]): Map<string, string> {
-  const shuffled = [...names];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = randomInt(i + 1);
-    const a = shuffled[i];
-    const b = shuffled[j];
+// Fisher-Yates is uniform; rejecting self-assignments preserves uniformity
+// across all derangements, including mutual pairs and smaller cycles.
+export function assign(
+  names: string[],
+  random: (maximum: number) => number = randomInt,
+): Map<string, string> {
+  if (names.length < 2 || new Set(names).size !== names.length)
+    throw new Error("At least two unique guests are required");
+  let shuffled: string[];
+  do {
+    shuffled = shuffle(names, random);
+  } while (shuffled.some((name, i) => name === names[i]));
+  return new Map(names.map((name, i) => [name, shuffled[i] ?? ""]));
+}
+function shuffle(
+  names: string[],
+  random: (maximum: number) => number,
+): string[] {
+  const result = [...names];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = random(i + 1);
+    const a = result[i];
+    const b = result[j];
     if (a === undefined || b === undefined)
       throw new Error("Invalid shuffle index");
-    shuffled[i] = b;
-    shuffled[j] = a;
+    result[i] = b;
+    result[j] = a;
   }
-  return new Map(
-    shuffled.map((name, i) => [
-      name,
-      shuffled[(i + 1) % shuffled.length] ?? "",
-    ]),
-  );
+  return result;
 }
 
 export function makeParty(input: z.infer<typeof inputSchema>): Party {
@@ -72,11 +95,23 @@ export function validateSnapshot(input: unknown): Snapshot {
   const state = snapshotSchema.parse(input);
   const ids = new Set<string>();
   for (const party of state.parties) {
-    if (ids.has(party.id)) throw new Error("Duplicate party ID");
-    ids.add(party.id);
-    validateGuests(party, ids);
+    for (const id of validateParty(party, ids)) ids.add(id);
   }
   return state;
+}
+
+// Validate only the candidate against committed IDs; never mutate the ID index
+// until its snapshot has been committed successfully.
+export function validateParty(
+  party: Party,
+  existing: ReadonlySet<string>,
+): Set<string> {
+  const ids = new Set<string>();
+  ids.add(party.id);
+  validateGuests(party, ids);
+  for (const id of ids)
+    if (existing.has(id)) throw new Error("Duplicate record ID");
+  return ids;
 }
 
 function validateGuests(party: Party, ids: Set<string>): void {
